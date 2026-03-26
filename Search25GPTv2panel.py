@@ -60,7 +60,11 @@ def _secret(name: str, default: str = "") -> str:
 def _get_azure_client() -> AzureOpenAI:
     endpoint = _secret("AZURE_OPENAI_ENDPOINT")
     api_version = _secret("AZURE_OPENAI_API_VERSION")
-    api_key = _secret("AZURE_OPENAI_API_KEY") or _secret("API_KEY")
+    api_key = (
+        _secret("AZURE_OPENAI_API_KEY")
+        or _secret("API_KEY")
+        or _secret("OPENAI_API_KEY")
+    )
     shortcode = _secret("SHORTCODE")
 
     if not endpoint or not api_version or not api_key:
