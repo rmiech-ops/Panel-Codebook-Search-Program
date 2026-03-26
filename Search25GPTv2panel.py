@@ -67,7 +67,7 @@ st.write("final api_key_test is nonempty:", bool(api_key_test))
 # PAGE CONFIG
 # =====================================================
 st.set_page_config(
-    page_title="MTF Codebook Search",
+    page_title="MTF Panel Codebooks Search",
     layout="wide",
     initial_sidebar_state="expanded",
 )
