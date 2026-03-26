@@ -1056,14 +1056,18 @@ with st.sidebar:
 # EMBEDDINGS + LLM HELPERS
 # =====================================================
 def _get_azure_client() -> AzureOpenAI:
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
-    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "").strip()
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip() or os.environ.get("API_KEY", "").strip()
-    shortcode = os.environ.get("SHORTCODE", "").strip()
+    endpoint = _secret("AZURE_OPENAI_ENDPOINT")
+    api_version = _secret("AZURE_OPENAI_API_VERSION")
+    api_key = _secret("AZURE_OPENAI_API_KEY") or _secret("API_KEY")
+    shortcode = _secret("SHORTCODE")
+
     if not endpoint or not api_version or not api_key:
-        raise RuntimeError("Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY (or API_KEY).")
+        raise RuntimeError(
+            "Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY (or API_KEY)."
+        )
     if not shortcode:
         raise RuntimeError("Missing SHORTCODE (required by UM GPT gateway).")
+
     return AzureOpenAI(
         azure_endpoint=endpoint,
         api_version=api_version,
@@ -1217,11 +1221,10 @@ def llm_plan_search(user_query: str, chat_deployment: str) -> Dict[str, object]:
 
 
 def _embedding_deployment() -> str:
-    dep = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "").strip()
+    dep = _secret("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
     if not dep:
         raise RuntimeError("Missing AZURE_OPENAI_EMBEDDING_DEPLOYMENT (Azure deployment name).")
     return dep
-
 
 def _truncate_for_embed(s: str, max_chars: int = 2500) -> str:
     s = (s or "").strip()
@@ -1300,7 +1303,9 @@ def semantic_topk_indices(path_str: str, mtime: float, query: str, topk: int) ->
     Xn = idx["Xn"]
 
     try:
-        chat_dep = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
+        chat_dep = _secret("AZURE_OPENAI_CHAT_DEPLOYMENT")
+        if not chat_dep:
+            raise RuntimeError("Missing AZURE_OPENAI_CHAT_DEPLOYMENT.")
         exp = llm_expand_for_lexical_rerank(query, chat_dep)
         expanded_parts = [query]
         expanded_parts += exp.get("terms", [])[:8]
@@ -1316,7 +1321,6 @@ def semantic_topk_indices(path_str: str, mtime: float, query: str, topk: int) ->
     cand = np.argpartition(-sims, kth=topk - 1)[:topk]
     cand = cand[np.argsort(-sims[cand])]
     return cand
-
 
 def _subject_match_score(df_in: pd.DataFrame, terms: List[str], phrases: List[str]) -> pd.Series:
     if df_in is None or df_in.empty:
@@ -1634,7 +1638,7 @@ def apply_filters_cached(
             "timeframe_hint": "",
         }
         filtered_embed = None
-        chat_dep = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
+        chat_dep = _secret("AZURE_OPENAI_CHAT_DEPLOYMENT")
         embed_query = aiq
 
         role = None
