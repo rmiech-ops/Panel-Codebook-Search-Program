@@ -56,31 +56,6 @@ def _secret(name: str, default: str = "") -> str:
         pass
     return default
 
-
-def _get_azure_client() -> AzureOpenAI:
-    endpoint = _secret("AZURE_OPENAI_ENDPOINT")
-    api_version = _secret("AZURE_OPENAI_API_VERSION")
-    api_key = (
-        _secret("AZURE_OPENAI_API_KEY")
-        or _secret("API_KEY")
-        or _secret("OPENAI_API_KEY")
-    )
-    shortcode = _secret("SHORTCODE")
-
-    if not endpoint or not api_version or not api_key:
-        raise RuntimeError(
-            "Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY."
-        )
-    if not shortcode:
-        raise RuntimeError("Missing SHORTCODE.")
-
-    return AzureOpenAI(
-        azure_endpoint=endpoint,
-        api_version=api_version,
-        api_key=api_key,
-        organization=shortcode,
-    )
-
 st.write("AZURE_OPENAI_API_KEY present:", "AZURE_OPENAI_API_KEY" in st.secrets)
 st.write("API_KEY present:", "API_KEY" in st.secrets)
 st.write("OPENAI_API_KEY present:", "OPENAI_API_KEY" in st.secrets)
@@ -1077,12 +1052,17 @@ with st.sidebar:
 def _get_azure_client() -> AzureOpenAI:
     endpoint = _secret("AZURE_OPENAI_ENDPOINT")
     api_version = _secret("AZURE_OPENAI_API_VERSION")
-    api_key = _secret("AZURE_OPENAI_API_KEY") or _secret("API_KEY")
+    api_key = (
+        _secret("AZURE_OPENAI_API_KEY")
+        or _secret("API_KEY")
+        or _secret("OPENAI_API_KEY")
+    )
     shortcode = _secret("SHORTCODE")
 
     if not endpoint or not api_version or not api_key:
         raise RuntimeError(
-            "Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY (or API_KEY)."
+            "Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / "
+            "AZURE_OPENAI_API_KEY (or API_KEY / OPENAI_API_KEY)."
         )
     if not shortcode:
         raise RuntimeError("Missing SHORTCODE (required by UM GPT gateway).")
@@ -1093,7 +1073,6 @@ def _get_azure_client() -> AzureOpenAI:
         api_key=api_key,
         organization=shortcode,
     )
-
 
 @st.cache_data(show_spinner=False)
 def llm_expand_for_lexical_rerank(user_query: str, chat_deployment: str) -> Dict[str, List[str]]:
