@@ -114,7 +114,7 @@ div[data-testid="stTextInput"] input {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("MTF Codebook Search")
+st.title("MTF Panel Codebook Search")
 
 st.markdown("""
 <style>
@@ -135,7 +135,7 @@ if "startup_done" not in st.session_state:
     startup_status = st.empty()
 
     startup_status.info(
-        "Initializing MTF Codebook Search...\n\n"
+        "Initializing MTF Panel Codebook Search...\n\n"
         "- Loading codebook\n"
         "- Preparing AI search index\n"
         "- Building search structures"
