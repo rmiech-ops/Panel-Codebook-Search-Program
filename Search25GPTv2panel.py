@@ -77,6 +77,16 @@ def _get_azure_client() -> AzureOpenAI:
         organization=shortcode,
     )
 
+st.write("endpoint key present:", "AZURE_OPENAI_ENDPOINT" in st.secrets)
+st.write("api version key present:", "AZURE_OPENAI_API_VERSION" in st.secrets)
+st.write("api key present:", "AZURE_OPENAI_API_KEY" in st.secrets)
+st.write("shortcode key present:", "SHORTCODE" in st.secrets)
+st.write("chat deployment key present:", "AZURE_OPENAI_CHAT_DEPLOYMENT" in st.secrets)
+st.write("embedding deployment key present:", "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" in st.secrets)
+
+st.write("endpoint via _secret is nonempty:", bool(_secret("AZURE_OPENAI_ENDPOINT")))
+st.write("api version via _secret is nonempty:", bool(_secret("AZURE_OPENAI_API_VERSION")))
+st.write("api key via _secret is nonempty:", bool(_secret("AZURE_OPENAI_API_KEY")))
 # =====================================================
 # PAGE CONFIG
 # =====================================================
