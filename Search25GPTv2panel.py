@@ -56,14 +56,6 @@ def _secret(name: str, default: str = "") -> str:
         pass
     return default
 
-st.write("AZURE_OPENAI_API_KEY present:", "AZURE_OPENAI_API_KEY" in st.secrets)
-st.write("API_KEY present:", "API_KEY" in st.secrets)
-st.write("OPENAI_API_KEY present:", "OPENAI_API_KEY" in st.secrets)
-
-st.write("AZURE_OPENAI_API_KEY via _secret:", bool(_secret("AZURE_OPENAI_API_KEY")))
-st.write("API_KEY via _secret:", bool(_secret("API_KEY")))
-st.write("OPENAI_API_KEY via _secret:", bool(_secret("OPENAI_API_KEY")))
-
 api_key_test = (
     _secret("AZURE_OPENAI_API_KEY")
     or _secret("API_KEY")
