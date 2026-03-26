@@ -87,6 +87,9 @@ st.write("embedding deployment key present:", "AZURE_OPENAI_EMBEDDING_DEPLOYMENT
 st.write("endpoint via _secret is nonempty:", bool(_secret("AZURE_OPENAI_ENDPOINT")))
 st.write("api version via _secret is nonempty:", bool(_secret("AZURE_OPENAI_API_VERSION")))
 st.write("api key via _secret is nonempty:", bool(_secret("AZURE_OPENAI_API_KEY")))
+
+st.write("secret keys:", list(st.secrets.keys()))
+
 # =====================================================
 # PAGE CONFIG
 # =====================================================
