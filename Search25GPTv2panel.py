@@ -43,17 +43,39 @@ def app_base_dir() -> Path:
 BASE_DIR = app_base_dir()
 
 # =====================================================
-# LOAD .ENV
+# Get API key
 # =====================================================
-env_paths = [
-    BASE_DIR / ".env",
-    Path.cwd() / ".env",
-    (Path(sys.executable).resolve().parent / ".env") if getattr(sys, "frozen", False) else None,
-]
-for p in env_paths:
-    if p and p.exists():
-        load_dotenv(dotenv_path=p, override=True)
-        break
+
+def _secret(name: str, default: str = "") -> str:
+    if name in os.environ and str(os.environ[name]).strip():
+        return str(os.environ[name]).strip()
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name]).strip()
+    except Exception:
+        pass
+    return default
+
+
+def _get_azure_client() -> AzureOpenAI:
+    endpoint = _secret("AZURE_OPENAI_ENDPOINT")
+    api_version = _secret("AZURE_OPENAI_API_VERSION")
+    api_key = _secret("AZURE_OPENAI_API_KEY") or _secret("API_KEY")
+    shortcode = _secret("SHORTCODE")
+
+    if not endpoint or not api_version or not api_key:
+        raise RuntimeError(
+            "Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY."
+        )
+    if not shortcode:
+        raise RuntimeError("Missing SHORTCODE.")
+
+    return AzureOpenAI(
+        azure_endpoint=endpoint,
+        api_version=api_version,
+        api_key=api_key,
+        organization=shortcode,
+    )
 
 # =====================================================
 # PAGE CONFIG
@@ -1512,7 +1534,7 @@ if PREWARM and "startup_done" not in st.session_state:
     except Exception as e:
         st.warning(
             "Semantic index prewarm failed; searches will still work but may be slower. "
-            f"({type(e).__name__}: {e})"
+            f"({type(e).__name__})"
         )
 
 
