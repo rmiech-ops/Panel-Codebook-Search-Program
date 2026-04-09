@@ -132,31 +132,27 @@ if "startup_done" not in st.session_state:
 
     st.session_state.startup_banner = startup_status
 
-if "startup_done" in st.session_state:
-    st.markdown(
-        '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
-        unsafe_allow_html=True
-    )
+st.markdown(
+    '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
+    unsafe_allow_html=True
+)
 
-    ai_query = st.text_input(
-        "AI-assisted search",
-        placeholder="Example: Show me questions on perceived risk of LSD use",
-        help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
-              '"questions about mother\'s education", '
-              '"when students first started using marijuana"'),
-        key="ui_ai_query",
-        label_visibility="collapsed",
-    )
+ai_query = st.text_input(
+    "AI-assisted search",
+    placeholder="Example: Show me questions on perceived risk of LSD use",
+    help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
+          '"questions about mother\\'s education", '
+          '"when students first started using marijuana"'),
+    key="ui_ai_query",
+    label_visibility="collapsed",
+)
 
-    st.caption(
-        "Tip: Use AI-assisted search to find relevant questions. "
-        "Then use Exact Word Search (upper left) with a distinctive phrase "
-        "from the survey question text—or the other filters—to locate that question "
-        "and related ones across the codebooks."
-    )
-else:
-    ai_query = ""
-
+st.caption(
+    "Tip: Use AI-assisted search to find relevant questions. "
+    "Then use Exact Word Search (upper left) with a distinctive phrase "
+    "from the survey question text-or the other filters-to locate that question "
+    "and related ones across the codebooks."
+)
 # =====================================================
 # AGE / FORM LABELS
 # =====================================================
@@ -1029,13 +1025,6 @@ for k, v in {
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
 AI_MAX_HITS_TARGET_DEFAULT = 60
 
-if "startup_done" not in st.session_state:
-    st.session_state.startup_done = True
-    if "startup_banner" in st.session_state:
-        try:
-            st.session_state.startup_banner.empty()
-        except Exception:
-            pass
 
 with st.sidebar:
     st.header("Filters")
