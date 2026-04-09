@@ -140,9 +140,9 @@ st.markdown(
 ai_query = st.text_input(
     "AI-assisted search",
     placeholder="Example: Show me questions on perceived risk of LSD use",
-    help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
-          '"questions about mother\\'s education", '
-          '"when students first started using marijuana"'),
+    help=("Examples: 'perceived risk of MDMA', 'disapproval of LSD', "
+          "'questions about mother's education', "
+          "'when students first started using marijuana'"),
     key="ui_ai_query",
     label_visibility="collapsed",
 )
