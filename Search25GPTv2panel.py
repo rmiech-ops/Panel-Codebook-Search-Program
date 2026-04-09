@@ -127,7 +127,6 @@ if "startup_done" not in st.session_state:
     startup_status.info(
         "Initializing MTF Panel Codebook Search...\n\n"
         "- Loading codebook\n"
-        "- Preparing AI search index\n"
         "- Building search structures"
     )
 
@@ -1029,6 +1028,15 @@ for k, v in {
 
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
 AI_MAX_HITS_TARGET_DEFAULT = 60
+
+if "startup_done" not in st.session_state:
+    st.session_state.startup_done = True
+    if "startup_banner" in st.session_state:
+        try:
+            st.session_state.startup_banner.empty()
+        except Exception:
+            pass
+    st.rerun()
 
 with st.sidebar:
     st.header("Filters")
