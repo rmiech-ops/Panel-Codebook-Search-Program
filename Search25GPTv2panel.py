@@ -119,43 +119,29 @@ h1 {
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------
-# Startup status banner
+# AI search box
 # -----------------------------------------------------
-if "startup_done" not in st.session_state:
-    startup_status = st.empty()
+st.markdown(
+    '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
+    unsafe_allow_html=True
+)
 
-    startup_status.info(
-        "Initializing MTF Panel Codebook Search...\n\n"
-        "- Loading codebook\n"
-        "- Building search structures"
-    )
+ai_query = st.text_input(
+    "AI-assisted search",
+    placeholder="Example: Show me questions on perceived risk of LSD use",
+    help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
+          '"questions about mother\'s education", '
+          '"when students first started using marijuana"'),
+    key="ui_ai_query",
+    label_visibility="collapsed",
+)
 
-    st.session_state.startup_banner = startup_status
-
-if "startup_done" in st.session_state:
-    st.markdown(
-        '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
-        unsafe_allow_html=True
-    )
-
-    ai_query = st.text_input(
-        "AI-assisted search",
-        placeholder="Example: Show me questions on perceived risk of LSD use",
-        help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
-              '"questions about mother\'s education", '
-              '"when students first started using marijuana"'),
-        key="ui_ai_query",
-        label_visibility="collapsed",
-    )
-
-    st.caption(
-        "Tip: Use AI-assisted search to find relevant questions. "
-        "Then use Exact Word Search (upper left) with a distinctive phrase "
-        "from the survey question text—or the other filters—to locate that question "
-        "and related ones across the codebooks."
-    )
-else:
-    ai_query = ""
+st.caption(
+    "Tip: Use AI-assisted search to find relevant questions. "
+    "Then use Exact Word Search (upper left) with a distinctive phrase "
+    "from the survey question text-or the other filters-to locate that question "
+    "and related ones across the codebooks."
+)
 
 # =====================================================
 # AGE / FORM LABELS
