@@ -1036,7 +1036,6 @@ if "startup_done" not in st.session_state:
             st.session_state.startup_banner.empty()
         except Exception:
             pass
-    st.rerun()
 
 with st.sidebar:
     st.header("Filters")
