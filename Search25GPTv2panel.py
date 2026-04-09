@@ -917,7 +917,11 @@ except FileNotFoundError:
     st.error(f"File not found: {FILE_PATH}")
     st.stop()
 
+st.write("DEBUG 1: file path found")
+
+st.write("DEBUG 2: about to load data")
 df = load_data(str(FILE_PATH), mtime)
+st.write("DEBUG 3: data loaded")
 
 # --- FIX: remove .0 from integer-like numeric fields ---
 def coerce_integer_like_series(s: pd.Series) -> pd.Series:
@@ -1006,7 +1010,9 @@ def build_cached_fields(path_str: str, mtime: float):
 
     return blob, qnorm, cnorm, scale, sig, subj_norm
 
+st.write("DEBUG 4: about to build cached fields")
 blob, qnorm, cnorm, scale_series, sig_series, subj_norm = build_cached_fields(str(FILE_PATH), mtime)
+st.write("DEBUG 5: cached fields built")
 df = df.copy()
 df["__BLOB_NORM"] = blob
 df["__QTEXT_NORM"] = qnorm
@@ -1026,7 +1032,9 @@ for k, v in {
 }.items():
     df[k] = subj_norm[v]
 
+st.write("DEBUG 6: about to build entity lexicon")
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
+st.write("DEBUG 7: entity lexicon built")
 AI_MAX_HITS_TARGET_DEFAULT = 60
 
 if "startup_done" not in st.session_state:
