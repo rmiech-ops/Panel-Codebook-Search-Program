@@ -23,6 +23,8 @@ import streamlit.components.v1 as components
 import yaml
 import numpy as np
 from openai import AzureOpenAI
+from dotenv import load_dotenv
+
 if "system_ready" not in st.session_state:
     st.session_state.system_ready = False
 
@@ -52,6 +54,19 @@ def _secret(name: str, default: str = "") -> str:
         pass
     return default
 
+
+# =====================================================
+# LOAD .ENV
+# =====================================================
+env_paths = [
+    BASE_DIR / ".env",
+    Path.cwd() / ".env",
+    (Path(sys.executable).resolve().parent / ".env") if getattr(sys, "frozen", False) else None,
+]
+for p in env_paths:
+    if p and p.exists():
+        load_dotenv(dotenv_path=p, override=True)
+        break
 
 # =====================================================
 # PAGE CONFIG
@@ -132,27 +147,31 @@ if "startup_done" not in st.session_state:
 
     st.session_state.startup_banner = startup_status
 
-st.markdown(
-    '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
-    unsafe_allow_html=True
-)
+if "startup_done" in st.session_state:
+    st.markdown(
+        '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
+        unsafe_allow_html=True
+    )
 
-ai_query = st.text_input(
-    "AI-assisted search",
-    placeholder="Example: Show me questions on perceived risk of LSD use",
-    help=("Examples: 'perceived risk of MDMA', 'disapproval of LSD', "
-          "'questions about mother's education', "
-          "'when students first started using marijuana'"),
-    key="ui_ai_query",
-    label_visibility="collapsed",
-)
+    ai_query = st.text_input(
+        "AI-assisted search",
+        placeholder="Example: Show me questions on perceived risk of LSD use",
+        help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
+              '"questions about mother\'s education", '
+              '"when students first started using marijuana"'),
+        key="ui_ai_query",
+        label_visibility="collapsed",
+    )
 
-st.caption(
-    "Tip: Use AI-assisted search to find relevant questions. "
-    "Then use Exact Word Search (upper left) with a distinctive phrase "
-    "from the survey question text-or the other filters-to locate that question "
-    "and related ones across the codebooks."
-)
+    st.caption(
+        "Tip: Use AI-assisted search to find relevant questions. "
+        "Then use Exact Word Search (upper left) with a distinctive phrase "
+        "from the survey question text—or the other filters—to locate that question "
+        "and related ones across the codebooks."
+    )
+else:
+    ai_query = ""
+
 # =====================================================
 # AGE / FORM LABELS
 # =====================================================
@@ -496,6 +515,7 @@ def _entity_from_question_text(q: str) -> List[str]:
     return uniq
 
 @st.cache_data(show_spinner=False)
+
 def build_entity_lexicon(path_str: str, mtime: float) -> Dict[str, Dict[str, object]]:
     _df = load_data(path_str, mtime)
     qtexts = _df.get("QTEXTALL", pd.Series([""] * len(_df))).astype(str).tolist()
@@ -1025,6 +1045,13 @@ for k, v in {
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
 AI_MAX_HITS_TARGET_DEFAULT = 60
 
+if "startup_done" not in st.session_state:
+    st.session_state.startup_done = True
+    if "startup_banner" in st.session_state:
+        try:
+            st.session_state.startup_banner.empty()
+        except Exception:
+            pass
 
 with st.sidebar:
     st.header("Filters")
@@ -1097,6 +1124,7 @@ with st.sidebar:
 # =====================================================
 # EMBEDDINGS + LLM HELPERS
 # =====================================================
+
 def _get_azure_client() -> AzureOpenAI:
     endpoint = _secret("AZURE_OPENAI_ENDPOINT")
     api_version = _secret("AZURE_OPENAI_API_VERSION")
@@ -1122,3 +1150,970 @@ def _get_azure_client() -> AzureOpenAI:
         organization=shortcode,
     )
 
+
+@st.cache_data(show_spinner=False)
+def llm_expand_for_lexical_rerank(user_query: str, chat_deployment: str) -> Dict[str, List[str]]:
+    q = (user_query or "").strip()
+    dep = (chat_deployment or "").strip()
+    if not q or not dep:
+        return {"terms": [], "phrases": []}
+    client = _get_azure_client()
+    system = (
+        "You expand a search query for searching survey QTEXTALL. "
+        "Return ONLY valid JSON with keys: terms, phrases. "
+        "terms: 6-12 single words (lowercase) including close variants, inflections, and likely survey wording. "
+        "phrases: 6-12 short phrases (2-6 words) likely to appear verbatim or nearly verbatim in survey questions. "
+        "Prefer terms and phrases that would help match how survey questions are actually worded. "
+        "Return only the most relevant expansions for the user's query."
+    )
+    user = "User query:\n" + q + "\n\nReturn ONLY JSON like:\n{\"terms\":[\"...\"],\"phrases\":[\"...\"]}"
+    resp = client.chat.completions.create(
+        model=dep,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.2,
+        max_tokens=250,
+    )
+    txt = (resp.choices[0].message.content or "").strip()
+    txt = re.sub(r"^```json\s*|\s*```$", "", txt.strip(), flags=re.I)
+    try:
+        obj = json.loads(txt)
+    except Exception:
+        m = re.search(r"\{.*\}", txt, flags=re.S)
+        if not m:
+            return {"terms": [], "phrases": []}
+        try:
+            obj = json.loads(m.group(0))
+        except Exception:
+            return {"terms": [], "phrases": []}
+
+    def _clean_list(xs, maxn):
+        out = []
+        if not isinstance(xs, list):
+            return out
+        for x in xs:
+            if not isinstance(x, str):
+                continue
+            s = normalize_for_match(x)
+            if s:
+                out.append(s)
+        seen = set()
+        out2 = []
+        for s in out:
+            if s in seen:
+                continue
+            seen.add(s)
+            out2.append(s)
+        return out2[:maxn]
+
+    terms = _clean_list(obj.get("terms", []), 12)
+    phrases = _clean_list(obj.get("phrases", []), 12)
+    return {"terms": terms, "phrases": phrases}
+
+@st.cache_data(show_spinner=False)
+def llm_plan_search(user_query: str, chat_deployment: str) -> Dict[str, object]:
+    q = (user_query or "").strip()
+    dep = (chat_deployment or "").strip()
+    empty = {
+        "intent": "",
+        "semantic_queries": [],
+        "include_terms": [],
+        "include_phrases": [],
+        "exclude_terms": [],
+        "exclude_phrases": [],
+        "entity_aliases": [],
+        "scale_hint": "",
+        "role_hint": "",
+        "timeframe_hint": "",
+    }
+    if not q or not dep:
+        return empty
+    client = _get_azure_client()
+    system = (
+        "You are a search planner for a survey codebook search engine. "
+        "Return ONLY valid JSON with these keys: intent, semantic_queries, include_terms, include_phrases, "
+        "exclude_terms, exclude_phrases, entity_aliases, scale_hint, role_hint, timeframe_hint. "
+        "semantic_queries should contain 2 to 5 rewritten search queries for semantic embedding retrieval. "
+        "include_terms and include_phrases should capture likely survey wording. "
+        "exclude_terms and exclude_phrases should capture nearby but wrong constructs to downweight. "
+        "scale_hint should be one of: RISK_4, DISAPPROVAL, AVAILABILITY_4, FRIENDS_USE_5, EDU_7, INITIATION, or empty. "
+        "role_hint should be one of: MOTHER, FATHER, PARENT, or empty. "
+        "timeframe_hint should be one of: PAST_YEAR, PAST_30D, LIFETIME, or empty. "
+        "entity_aliases should include alternate names for the main substance or entity. "
+        "Do not explain anything. Return only JSON."
+    )
+    resp = client.chat.completions.create(
+        model=dep,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": q},
+        ],
+        temperature=0.1,
+        max_tokens=500,
+    )
+    txt = (resp.choices[0].message.content or "").strip()
+    txt = re.sub(r"^```json\s*|\s*```$", "", txt.strip(), flags=re.I)
+    try:
+        obj = json.loads(txt)
+    except Exception:
+        m = re.search(r"\{.*\}", txt, flags=re.S)
+        if not m:
+            return empty
+        try:
+            obj = json.loads(m.group(0))
+        except Exception:
+            return empty
+
+    def clean_list(val, maxn=12):
+        if not isinstance(val, list):
+            return []
+        out = []
+        for x in val:
+            if not isinstance(x, str):
+                continue
+            s = normalize_for_match(x)
+            if s:
+                out.append(s)
+        return _dedupe_terms(out)[:maxn]
+
+    plan = {
+        "intent": str(obj.get("intent", "") or "").strip(),
+        "semantic_queries": clean_list(obj.get("semantic_queries", []), 5),
+        "include_terms": clean_list(obj.get("include_terms", []), 12),
+        "include_phrases": clean_list(obj.get("include_phrases", []), 12),
+        "exclude_terms": clean_list(obj.get("exclude_terms", []), 12),
+        "exclude_phrases": clean_list(obj.get("exclude_phrases", []), 12),
+        "entity_aliases": clean_list(obj.get("entity_aliases", []), 12),
+        "scale_hint": str(obj.get("scale_hint", "") or "").strip(),
+        "role_hint": str(obj.get("role_hint", "") or "").strip(),
+        "timeframe_hint": str(obj.get("timeframe_hint", "") or "").strip(),
+    }
+    if not plan["semantic_queries"]:
+        plan["semantic_queries"] = [normalize_for_match(q)]
+    return plan
+
+def _embedding_deployment() -> str:
+    dep = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "").strip()
+    if not dep:
+        raise RuntimeError("Missing AZURE_OPENAI_EMBEDDING_DEPLOYMENT (Azure deployment name).")
+    return dep
+
+def _truncate_for_embed(s: str, max_chars: int = 2500) -> str:
+    s = (s or "").strip()
+    return s if len(s) <= max_chars else s[:max_chars]
+
+def _build_doc_text(df_in: pd.DataFrame) -> List[str]:
+    q = df_in.get("QTEXTALL", "").astype(str)
+    c = df_in.get("CATEGORYTEXT", df_in.get("CATEGORY TEXT", "")).astype(str)
+    n = df_in.get("QNAME", "").astype(str)
+    out = []
+    for i in range(len(df_in)):
+        txt = (
+            "VARIABLE: " + str(n.iloc[i]) + "\n"
+            "QUESTION: " + str(q.iloc[i]) + "\n"
+            "RESPONSES: " + str(c.iloc[i])
+        )
+        out.append(_truncate_for_embed(txt, 2500))
+    return out
+
+def _embed_texts_azure(texts: List[str]) -> np.ndarray:
+    client = _get_azure_client()
+    deployment = _embedding_deployment()
+    batch_sz = int(os.environ.get("MTF_EMBED_BATCH", "128").strip() or "128")
+    vecs: List[np.ndarray] = []
+    for i in range(0, len(texts), batch_sz):
+        chunk = texts[i:i + batch_sz]
+        resp = client.embeddings.create(model=deployment, input=chunk)
+        for item in resp.data:
+            vecs.append(np.asarray(item.embedding, dtype=np.float32))
+    return np.vstack(vecs)
+
+def _l2_normalize_rows(X: np.ndarray) -> np.ndarray:
+    denom = np.linalg.norm(X, axis=1, keepdims=True)
+    denom[denom == 0.0] = 1.0
+    return X / denom
+
+def _embed_cache_path(path_str: str) -> Path:
+    return Path(path_str).with_suffix(".embeddings.npz")
+
+def _embed_cache_meta_path(path_str: str) -> Path:
+    return Path(path_str).with_suffix(".embeddings.meta.txt")
+
+@st.cache_resource(show_spinner=True)
+def build_embedding_index(path_str: str, mtime: float) -> Dict[str, object]:
+    cache_npz = _embed_cache_path(path_str)
+    cache_meta = _embed_cache_meta_path(path_str)
+    try:
+        if cache_npz.exists() and cache_meta.exists():
+            meta = cache_meta.read_text(encoding="utf-8").strip()
+            if meta == str(mtime):
+                data = np.load(cache_npz)
+                Xn = data["Xn"].astype(np.float32)
+                return {"Xn": Xn}
+    except Exception:
+        pass
+    _df = load_data(path_str, mtime)
+    texts = _build_doc_text(_df)
+    X = _embed_texts_azure(texts)
+    Xn = _l2_normalize_rows(X).astype(np.float32)
+    try:
+        np.savez_compressed(cache_npz, Xn=Xn)
+        cache_meta.write_text(str(mtime), encoding="utf-8")
+    except Exception:
+        pass
+    return {"Xn": Xn}
+
+def semantic_topk_indices(path_str: str, mtime: float, query: str, topk: int) -> np.ndarray:
+    idx = build_embedding_index(path_str, mtime)
+    Xn = idx["Xn"]
+
+    try:
+        chat_dep = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
+        exp = llm_expand_for_lexical_rerank(query, chat_dep)
+        expanded_parts = [query]
+        expanded_parts += exp.get("terms", [])[:8]
+        expanded_parts += exp.get("phrases", [])[:6]
+        expanded_query = " ".join(expanded_parts)
+    except Exception:
+        expanded_query = query
+
+    qvec = _embed_texts_azure([_truncate_for_embed(expanded_query, 2000)])
+    qn = _l2_normalize_rows(qvec.astype(np.float32))[0]
+    sims = Xn @ qn
+    topk = int(max(1, min(topk, sims.shape[0])))
+    cand = np.argpartition(-sims, kth=topk - 1)[:topk]
+    cand = cand[np.argsort(-sims[cand])]
+    return cand
+
+def _subject_match_score(df_in: pd.DataFrame, terms: List[str], phrases: List[str]) -> pd.Series:
+    if df_in is None or df_in.empty:
+        return pd.Series(dtype=float)
+    score = pd.Series(0.0, index=df_in.index)
+    subj_weights = {
+        "__SUBJ_1_L1": 1.5, "__SUBJ_1_L2": 3.5, "__SUBJ_1_L3": 4.5,
+        "__SUBJ_2_L1": 0.8, "__SUBJ_2_L2": 1.5, "__SUBJ_2_L3": 2.0,
+        "__SUBJ_3_L1": 0.3, "__SUBJ_3_L2": 0.5, "__SUBJ_3_L3": 0.8,
+    }
+    all_terms = [normalize_for_match(t) for t in (terms or []) if normalize_for_match(t)]
+    all_phrases = [normalize_for_match(p) for p in (phrases or []) if normalize_for_match(p)]
+    for col, wt in subj_weights.items():
+        if col not in df_in.columns:
+            continue
+        s = df_in[col].astype(str)
+        for t in all_terms[:12]:
+            if len(t) >= 4:
+                score += s.str.contains(re.escape(t), na=False).astype(float) * wt
+        for p in all_phrases[:12]:
+            if len(p.split()) >= 2:
+                score += s.str.contains(re.escape(p), na=False).astype(float) * (wt * 1.5)
+    return score
+
+def broad_lexical_candidate_indices(
+    df_in: pd.DataFrame,
+    user_query: str,
+    include_terms: Optional[List[str]] = None,
+    include_phrases: Optional[List[str]] = None,
+    subject_hints: Optional[List[str]] = None,
+    topk: int = 2500,
+) -> np.ndarray:
+    if df_in is None or df_in.empty:
+        return np.array([], dtype=int)
+
+    qn = normalize_for_match(user_query)
+    include_terms = include_terms or []
+    include_phrases = include_phrases or []
+    subject_hints = subject_hints or []
+
+    tokens = [t for t in qn.split() if len(t) >= 3 and t not in _STOP_TEXT][:12]
+    phrases = _dedupe_terms(include_phrases[:12])
+    more_terms = _dedupe_terms(include_terms[:12] + subject_hints[:8])
+
+    blob = df_in["__BLOB_NORM"].astype(str)
+    qtext = df_in["__QTEXT_NORM"].astype(str)
+    cat = df_in["__CAT_NORM"].astype(str)
+    qname = df_in["QNAME"].astype(str).apply(normalize_for_match)
+
+    score = pd.Series(0.0, index=df_in.index)
+
+    for t in tokens:
+        score += qtext.str.contains(re.escape(t), na=False).astype(float) * 4.0
+        score += qname.str.contains(re.escape(t), na=False).astype(float) * 3.5
+        score += blob.str.contains(re.escape(t), na=False).astype(float) * 1.25
+
+    for t in more_terms:
+        if len(t) >= 3:
+            score += qtext.str.contains(re.escape(t), na=False).astype(float) * 3.0
+            score += qname.str.contains(re.escape(t), na=False).astype(float) * 2.5
+            score += cat.str.contains(re.escape(t), na=False).astype(float) * 1.25
+            score += blob.str.contains(re.escape(t), na=False).astype(float) * 1.0
+
+    for p in phrases:
+        if len(p.split()) >= 2:
+            score += qtext.str.contains(re.escape(p), na=False).astype(float) * 7.0
+            score += cat.str.contains(re.escape(p), na=False).astype(float) * 3.0
+            score += blob.str.contains(re.escape(p), na=False).astype(float) * 2.0
+
+    score += _subject_match_score(df_in, terms=(tokens + more_terms), phrases=phrases)
+
+    positive = score[score > 0].sort_values(ascending=False)
+    if positive.empty:
+        return np.array([], dtype=int)
+    return positive.head(int(topk)).index.to_numpy()
+
+def rerank_with_expansions(
+    df_in: pd.DataFrame,
+    user_query: str,
+    expansions: Dict[str, List[str]],
+    planner: Optional[Dict[str, object]] = None,
+    entity_terms: Optional[List[str]] = None,
+    keep: int = 60,
+    query_domain: str = "ambiguous",
+    explicit_substance: bool = False,
+    role_hint: str = "",
+    scale_hint_override: str = "",
+    timeframe_hint_override: str = "",
+) -> pd.DataFrame:
+    if df_in is None or df_in.empty or keep <= 0:
+        return df_in
+
+    planner = planner or {}
+    entity_terms = entity_terms or []
+
+    qn = normalize_for_match(user_query)
+    blob = df_in["__BLOB_NORM"].astype(str)
+    qtext = df_in["__QTEXT_NORM"].astype(str)
+    cat = df_in["__CAT_NORM"].astype(str)
+    qname = df_in["QNAME"].astype(str).apply(normalize_for_match)
+
+    q_toks = [t for t in qn.split() if len(t) >= 4][:10]
+    exp_terms = (expansions or {}).get("terms", []) or []
+    exp_phrases = (expansions or {}).get("phrases", []) or []
+
+    plan_inc_terms = planner.get("include_terms", []) or []
+    plan_inc_phrases = planner.get("include_phrases", []) or []
+    timeframe_hint = timeframe_hint_override or str(planner.get("timeframe_hint", "") or "")
+    scale_hint = scale_hint_override or str(planner.get("scale_hint", "") or "")
+
+    score = pd.Series(0.0, index=df_in.index)
+
+    for t in q_toks:
+        score += qtext.str.contains(re.escape(t), na=False).astype(float) * 3.0
+        score += qname.str.contains(re.escape(t), na=False).astype(float) * 2.0
+        score += blob.str.contains(re.escape(t), na=False).astype(float) * 1.0
+
+    for t in exp_terms[:12]:
+        if len(t) >= 4:
+            score += qtext.str.contains(re.escape(t), na=False).astype(float) * 2.5
+            score += qname.str.contains(re.escape(t), na=False).astype(float) * 1.5
+            score += blob.str.contains(re.escape(t), na=False).astype(float) * 1.25
+
+    for p in exp_phrases[:12]:
+        if len(p.split()) >= 2:
+            score += qtext.str.contains(re.escape(p), na=False).astype(float) * 6.0
+            score += cat.str.contains(re.escape(p), na=False).astype(float) * 2.5
+            score += blob.str.contains(re.escape(p), na=False).astype(float) * 2.0
+
+    for t in plan_inc_terms[:12]:
+        if len(t) >= 4:
+            score += qtext.str.contains(re.escape(t), na=False).astype(float) * 2.5
+            score += qname.str.contains(re.escape(t), na=False).astype(float) * 1.5
+            score += blob.str.contains(re.escape(t), na=False).astype(float) * 1.25
+
+    for p in plan_inc_phrases[:12]:
+        if len(p.split()) >= 2:
+            score += qtext.str.contains(re.escape(p), na=False).astype(float) * 6.5
+            score += cat.str.contains(re.escape(p), na=False).astype(float) * 2.5
+            score += blob.str.contains(re.escape(p), na=False).astype(float) * 2.0
+
+    if entity_terms:
+        entity_mask = pd.Series(False, index=df_in.index)
+        for t in entity_terms:
+            tn = normalize_for_match(t)
+            if tn:
+                entity_mask = entity_mask | blob.str.contains(re.escape(tn), na=False)
+        score += entity_mask.astype(float) * 2.0
+
+    if timeframe_hint and timeframe_hint in QTEXT_TIMEFRAME_INCLUDE:
+        for p in QTEXT_TIMEFRAME_INCLUDE.get(timeframe_hint, []):
+            pn = normalize_for_match(p)
+            score += qtext.str.contains(re.escape(pn), na=False).astype(float) * 1.5
+
+    if scale_hint:
+        score += (df_in["__SCALE"].astype(str) == scale_hint).astype(float) * 2.0
+        for p in QTEXT_GATE_PHRASES.get(scale_hint, []):
+            pn = normalize_for_match(p)
+            if pn:
+                score += qtext.str.contains(re.escape(pn), na=False).astype(float) * 1.25
+
+    role_hint = str(role_hint or "").strip()
+    if role_hint == "MOTHER":
+        score += qtext.str.contains(r"\bmother\b|\bmom\b", na=False).astype(float) * 2.5
+    elif role_hint == "FATHER":
+        score += qtext.str.contains(r"\bfather\b|\bdad\b", na=False).astype(float) * 2.5
+    elif role_hint == "PARENT":
+        score += qtext.str.contains(r"\bparent\b|\bparents\b", na=False).astype(float) * 2.0
+
+    score += _subject_match_score(
+        df_in,
+        terms=(q_toks + exp_terms + plan_inc_terms),
+        phrases=(exp_phrases + plan_inc_phrases),
+    )
+
+    if query_domain == "non_substance" and not explicit_substance:
+        substance_mask = pd.Series(False, index=df_in.index)
+        for t in SUBSTANCE_TERMS_FLAT:
+            if t:
+                substance_mask = substance_mask | blob.str.contains(re.escape(t), na=False)
+        score -= substance_mask.astype(float) * 2.5
+
+    if float(score.max()) <= 0.0:
+        return df_in.head(keep)
+
+    out = df_in.assign(__RERANK_SCORE=score).sort_values("__RERANK_SCORE", ascending=False)
+    out = out.drop(columns=["__RERANK_SCORE"], errors="ignore")
+    return out.head(keep)
+
+def _env_on(name: str, default: bool = True) -> bool:
+    v = os.environ.get(name, "").strip().lower()
+    if v == "":
+        return default
+    return v in ("1", "true", "t", "yes", "y", "on")
+
+PREWARM = False
+if PREWARM and "startup_done" not in st.session_state:
+    try:
+        with st.spinner("Preparing AI search index (first run may take ~30 seconds)..."):
+            _ = build_embedding_index(str(FILE_PATH), mtime)
+
+        banner = st.session_state.get("startup_banner")
+        if banner is not None:
+            banner.success("MTF Panel Codebook Search ready.")
+            time.sleep(1)
+            banner.empty()
+
+        st.session_state.startup_done = True
+        st.rerun()
+
+    except Exception as e:
+        st.warning(
+            "Semantic index prewarm failed; searches will still work but may be slower. "
+            f"({type(e).__name__})"
+        )
+
+@st.cache_data(show_spinner=False)
+def apply_filters_cached(
+    path_str: str,
+    mtime: float,
+    ai_query: str,
+    search_query: str,
+    search_mode: str,
+    phrase_mode: bool,
+    selected_ages: tuple,
+    selected_forms: tuple,
+    irn: str,
+    first_range,
+    latest_range,
+    ai_max_hits_target: int,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    _df = load_data(path_str, mtime).copy()
+    blob, qnorm, cnorm, scale_series, sig_series, subj_norm = build_cached_fields(path_str, mtime)
+    _df["__BLOB_NORM"] = blob
+    _df["__QTEXT_NORM"] = qnorm
+    _df["__CAT_NORM"] = cnorm
+    _df["__SCALE"] = scale_series
+    _df["__CAT_SIG"] = sig_series
+    for k, v in {
+        "__SUBJ_1_L1": "SUBJ_1_TEXT_LEV1",
+        "__SUBJ_1_L2": "SUBJ_1_TEXT_LEV2",
+        "__SUBJ_1_L3": "SUBJ_1_TEXT_LEV3",
+        "__SUBJ_2_L1": "SUBJ_2_TEXT_LEV1",
+        "__SUBJ_2_L2": "SUBJ_2_TEXT_LEV2",
+        "__SUBJ_2_L3": "SUBJ_2_TEXT_LEV3",
+        "__SUBJ_3_L1": "SUBJ_3_TEXT_LEV1",
+        "__SUBJ_3_L2": "SUBJ_3_TEXT_LEV2",
+        "__SUBJ_3_L3": "SUBJ_3_TEXT_LEV3",
+    }.items():
+        _df[k] = subj_norm[v]
+
+    entity_lex = build_entity_lexicon(path_str, mtime)
+    debug: Dict[str, object] = {
+        "used_ai": False,
+        "ai_query": (ai_query or "").strip(),
+        "scale_gate": "",
+        "role_gate": "",
+        "timeframe_gate": "",
+        "entity_terms": [],
+        "tighten_terms": [],
+        "qtext_phrase_gate_used": False,
+        "cat_sig_gate": "",
+        "stage_hits_after_ai": None,
+        "notes": "",
+        "planner_used": False,
+        "planner_intent": "",
+        "plan_include_terms": [],
+        "plan_include_phrases": [],
+        "plan_exclude_terms": [],
+        "plan_subject_hints": [],
+        "query_domain": "",
+        "explicit_substance": False,
+        "embed_hits": 0,
+        "lexical_hits": 0,
+        "union_hits": 0,
+    }
+
+    filtered = _df
+    has_ai = bool((ai_query or "").strip())
+    has_lit = bool((search_query or "").strip())
+    has_id = bool(str(irn or "").strip())
+    ALL_AGES_DEFAULT = tuple(AGE_FILTER_OPTIONS)
+    ALL_FORMS_DEFAULT = tuple(FORM_FILTER_OPTIONS)
+    ages_tuple = tuple(selected_ages) if selected_ages else tuple()
+    forms_tuple = tuple(selected_forms) if selected_forms else tuple()
+    age_changed = set(ages_tuple) != set(ALL_AGES_DEFAULT)
+    form_changed = set(forms_tuple) != set(ALL_FORMS_DEFAULT)
+    year_filter_on = (first_range is not None) or (latest_range is not None)
+    has_any_filter_intent = bool(has_id or age_changed or form_changed or year_filter_on)
+
+    if not (has_ai or has_lit or has_any_filter_intent):
+        return _df.iloc[0:0].copy(), debug
+
+    aiq = (ai_query or "").strip()
+
+    if aiq:
+        debug["used_ai"] = True
+        exp = {"terms": [], "phrases": []}
+        plan = {
+            "semantic_queries": [],
+            "include_terms": [],
+            "include_phrases": [],
+            "exclude_terms": [],
+            "exclude_phrases": [],
+            "entity_aliases": [],
+            "scale_hint": "",
+            "role_hint": "",
+            "timeframe_hint": "",
+        }
+        filtered_embed = None
+        chat_dep = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "").strip()
+        embed_query = aiq
+
+        role = None
+        scale_guess = None
+        timeframe = None
+        entity_terms = []
+        plan_include_terms = []
+        plan_include_phrases = []
+        plan_exclude_terms = []
+        plan_subject_hints = []
+
+        explicit_substance = query_mentions_substance(aiq)
+        query_domain = infer_query_domain(aiq)
+        debug["query_domain"] = query_domain
+        debug["explicit_substance"] = explicit_substance
+
+        try:
+            plan = llm_plan_search(aiq, chat_dep)
+            debug["planner_used"] = True
+            debug["planner_intent"] = plan.get("intent", "") or ""
+            semantic_queries = plan.get("semantic_queries", []) or []
+            embed_pieces = [aiq] + semantic_queries[:4] + list(plan.get("include_phrases", []) or [])[:4]
+            embed_query = " | ".join([x for x in embed_pieces if x])
+
+        except Exception as e:
+            debug["notes"] = f"Planner unavailable ({type(e).__name__}: {e})"
+
+        try:
+            topk = int(os.environ.get("MTF_EMBED_TOPK", "2000").strip() or "2000")
+            top_idx = semantic_topk_indices(path_str, mtime, embed_query, topk=topk)
+            filtered_embed = _df.iloc[top_idx].copy()
+            debug["embed_hits"] = int(len(filtered_embed))
+            note = f"Embeddings prefilter: topK={len(filtered_embed)}"
+            if debug["notes"]:
+                debug["notes"] += " | " + note
+            else:
+                debug["notes"] = note
+            exp = llm_expand_for_lexical_rerank(aiq, chat_dep)
+
+        except Exception as e:
+            debug["notes"] = (
+                (debug.get("notes", "") + " | " if debug.get("notes") else "")
+                + f"Embeddings prefilter unavailable; using lexical retrieval. ({type(e).__name__}: {e})"
+            )
+
+        plan2 = enhanced_parse(
+            aiq,
+            lambda q: detect_entity_terms(q, entity_lex) if query_mentions_substance(q) else [],
+            parse_role_from_text,
+            parse_scale_from_ai_text,
+            parse_timeframe_from_ai_text
+        )
+
+        role = plan2.get("role")
+        scale_guess = plan2.get("scale")
+        timeframe = plan2.get("timeframe")
+        entity_terms = plan2.get("entity") or []
+        plan_include_terms = plan2.get("include_terms") or []
+        plan_include_phrases = plan2.get("include_phrases") or []
+        plan_exclude_terms = plan2.get("exclude_terms") or []
+        plan_subject_hints = plan2.get("subject_hints") or []
+
+        if not explicit_substance and query_domain == "non_substance":
+            entity_terms = []
+
+        exp["terms"] = list(dict.fromkeys((exp.get("terms", []) or []) + plan_include_terms))
+        exp["phrases"] = list(dict.fromkeys((exp.get("phrases", []) or []) + plan_include_phrases))
+
+        if query_domain == "non_substance" and not explicit_substance:
+            exp["terms"] = [t for t in exp["terms"] if t not in SUBSTANCE_TERMS_FLAT]
+            exp["phrases"] = [p for p in exp["phrases"] if not query_mentions_substance(p)]
+            plan_include_terms = [t for t in plan_include_terms if t not in SUBSTANCE_TERMS_FLAT]
+            plan_include_phrases = [p for p in plan_include_phrases if not query_mentions_substance(p)]
+
+        debug["notes"] = (debug.get("notes", "") + " | " if debug.get("notes") else "") + "Broad AI retrieval mode"
+        debug["timeframe_gate"] = (timeframe or "")
+        debug["plan_include_terms"] = plan_include_terms
+        debug["plan_include_phrases"] = plan_include_phrases
+        debug["plan_exclude_terms"] = plan_exclude_terms
+        debug["plan_subject_hints"] = plan_subject_hints
+        debug["scale_gate"] = (scale_guess or "")
+        debug["role_gate"] = (role or "")
+        debug["entity_terms"] = entity_terms
+
+        lexical_idx = broad_lexical_candidate_indices(
+            _df,
+            aiq,
+            include_terms=plan_include_terms + list(plan.get("include_terms", []) or []),
+            include_phrases=plan_include_phrases + list(plan.get("include_phrases", []) or []),
+            subject_hints=plan_subject_hints,
+            topk=int(os.environ.get("MTF_LEXICAL_TOPK", "2500").strip() or "2500"),
+        )
+        debug["lexical_hits"] = int(len(lexical_idx))
+
+        candidate_index = []
+        if filtered_embed is not None and len(filtered_embed) > 0:
+            candidate_index.extend(list(filtered_embed.index))
+        if len(lexical_idx) > 0:
+            candidate_index.extend(list(lexical_idx))
+
+        if candidate_index:
+            seen = set()
+            ordered_union = []
+            for idx0 in candidate_index:
+                if idx0 in seen:
+                    continue
+                seen.add(idx0)
+                ordered_union.append(idx0)
+            filtered = _df.loc[ordered_union].copy()
+        else:
+            filtered = _df.copy()
+
+        debug["union_hits"] = int(len(filtered))
+
+        keep_n = int(os.environ.get("MTF_AI_KEEP", "60").strip() or "60")
+        pretruncate_hits = int(len(filtered))
+
+        filtered = rerank_with_expansions(
+            filtered,
+            aiq,
+            exp,
+            planner=plan,
+            entity_terms=entity_terms,
+            keep=keep_n,
+            query_domain=query_domain,
+            explicit_substance=explicit_substance,
+            role_hint=(role or str(plan.get("role_hint", "") or "")),
+            scale_hint_override=(scale_guess or str(plan.get("scale_hint", "") or "")),
+            timeframe_hint_override=(timeframe or str(plan.get("timeframe_hint", "") or "")),
+        )
+
+        debug["stage_hits_after_ai"] = pretruncate_hits
+        debug["notes"] = (debug.get("notes", "") + " | " if debug.get("notes") else "") + f"Reranked top {keep_n}"
+
+    else:
+        if search_query:
+            terms, explicit_op = parse_search_terms(search_query, phrase_mode)
+            op = explicit_op if explicit_op else search_mode
+            masks = []
+            for t in terms:
+                tn = normalize_for_match(t)
+                if tn:
+                    masks.append(filtered["__BLOB_NORM"].str.contains(re.escape(tn), na=False))
+            if masks:
+                mask = masks[0]
+                for m in masks[1:]:
+                    mask = mask & m if op == "AND" else mask | m
+                filtered = filtered[mask]
+
+    if selected_ages:
+        age_mask = filtered["BY_X_FU_X"].astype(str).combine(filtered["FORM"].astype(str), branch_form_to_age).isin(list(selected_ages))
+        filtered = filtered[age_mask]
+    if selected_forms:
+        form_mask = filtered["BY_X_FU_X"].astype(str).combine(filtered["FORM"].astype(str), form_filter_label).isin(list(selected_forms))
+        filtered = filtered[form_mask]
+    if irn:
+        irn_s = str(irn).strip()
+        col_s = filtered["ITEMREFNO"].astype(str).str.strip()
+        if irn_s.isdigit():
+            irn_int = int(irn_s)
+            col_int = pd.to_numeric(col_s, errors="coerce")
+            filtered2 = filtered[col_int == irn_int]
+            if len(filtered2) == 0:
+                filtered2 = filtered[col_s == irn_s]
+            filtered = filtered2
+        else:
+            filtered = filtered[col_s == irn_s]
+    if first_range is not None:
+        y0, y1 = first_range
+        s = pd.to_numeric(filtered["FIRST_YR"], errors="coerce")
+        filtered = filtered[s.notna() & (s >= y0) & (s <= y1)]
+    if latest_range is not None:
+        y0, y1 = latest_range
+        s = pd.to_numeric(filtered["LATEST_YR"], errors="coerce")
+        filtered = filtered[s.notna() & (s >= y0) & (s <= y1)]
+
+    return filtered, debug
+
+filtered, ai_debug = apply_filters_cached(
+    str(FILE_PATH),
+    mtime,
+    ai_query,
+    search_query,
+    search_mode,
+    phrase_mode,
+    tuple(selected_ages),
+    tuple(selected_forms),
+    irn,
+    first_range,
+    latest_range,
+    int(AI_MAX_HITS_TARGET_DEFAULT),
+)
+
+DROP_COLS = [
+    "FIRST_YR_NUM", "LATEST_YR_NUM", "WEB", "RESPCAT_ID", "VNUM", "VERS_ORIG",
+    "__BLOB_NORM", "__QTEXT_NORM", "__CAT_NORM", "__SCALE", "__CAT_SIG",
+    "__SUBJ_1_L1", "__SUBJ_1_L2", "__SUBJ_1_L3",
+    "__SUBJ_2_L1", "__SUBJ_2_L2", "__SUBJ_2_L3",
+    "__SUBJ_3_L1", "__SUBJ_3_L2", "__SUBJ_3_L3",
+    "SUBJ_1", "SUBJ_1_TEXT_LEV1", "SUBJ_1_TEXT_LEV2", "SUBJ_1_TEXT_LEV3",
+    "SUBJ_2", "SUBJ_2_TEXT_LEV1", "SUBJ_2_TEXT_LEV2", "SUBJ_2_TEXT_LEV3",
+    "SUBJ_3", "SUBJ_3_TEXT_LEV1", "SUBJ_3_TEXT_LEV2", "SUBJ_3_TEXT_LEV3",
+]
+
+safe_df = filtered.drop(columns=DROP_COLS, errors="ignore")
+safe_df = make_arrow_safe(safe_df)
+
+safe_df = safe_df.rename(columns={
+    "ITEMREFNO": "irn",
+    "QNAME": "variable_label",
+    "BY_X_FU_X": "branch",
+    "FORM": "form",
+    "FIRST_YR": "first_yr",
+    "LATEST_YR": "latest_yr",
+    "ORIGQ": "original_question",
+    "CHG_YR": "year_question_changed",
+    "CHG_TYPE": "type_of_question_change",
+    "QTEXTALL": "question_text",
+    "CATEGORYTEXT": "response_categories",
+    "CATEGORY TEXT": "response_categories",
+    "VERSION": "version",
+    "BY_PANL": "by_panel",
+    "FU1_PANL": "fu1_panel",
+    "FU2_PANL": "fu2_panel",
+    "FU3_PANL": "fu3_panel",
+    "FU4_PANL": "fu4_panel",
+    "FU5_PANL": "fu5_panel",
+    "FU6_PANL": "fu6_panel",
+    "FZ1_PANL": "fz1_panel",
+    "FZ2_PANL": "fz2_panel",
+    "FZ3_PANL": "fz3_panel",
+    "FZ4_PANL": "fz4_panel",
+    "FZ5_PANL": "fz5_panel",
+    "FZ6_PANL": "fz6_panel",
+    "FZ7_PANL": "fz7_panel",
+    "GAP_YEARS": "Gap_years",
+    "NOTES": "Notes",
+})
+
+if "branch" in safe_df.columns:
+    safe_df["age"] = safe_df.apply(lambda r: branch_form_to_age(r.get("branch", ""), r.get("form", "")), axis=1)
+    safe_df["form"] = safe_df.apply(lambda r: result_form_label(r.get("branch", ""), r.get("form", "")), axis=1)
+    safe_df = safe_df.drop(columns=["branch"], errors="ignore")
+
+if "original_question" in safe_df.columns:
+    safe_df["original_question"] = safe_df["original_question"].apply(origq_to_yes_no)
+
+preferred_order = [
+    "irn",
+    "variable_label",
+    "age",
+    "form",
+    "first_yr",
+    "latest_yr",
+    "original_question",
+    "year_question_changed",
+    "type_of_question_change",
+    "question_text",
+    "response_categories",
+    "version",
+    *PANEL_FIELD_ORDER,
+    "Gap_years",
+    "Notes",
+]
+
+cols = [c for c in preferred_order if c in safe_df.columns]
+safe_df = safe_df[cols]
+
+PRETTY_COLS = {
+    "irn": "Question\nID",
+    "variable_label": "Variable\nlabel",
+    "age": "Age",
+    "form": "Form",
+    "first_yr": "First\nyear",
+    "latest_yr": "Latest\nyear",
+    "original_question": "Original\nQuestion",
+    "year_question_changed": "Year Question\nChanged",
+    "type_of_question_change": "Type of\nQuestion Change",
+    "question_text": "Question\ntext",
+    "response_categories": "Response\nCategories",
+    "version": "Version",
+    **PANEL_PRETTY_COLS,
+}
+
+safe_df_pretty = safe_df.rename(columns=PRETTY_COLS)
+
+has_ai = bool((ai_query or "").strip())
+has_lit = bool((search_query or "").strip())
+has_id = bool(str(irn or "").strip())
+age_changed = set(tuple(selected_ages)) != set(AGE_FILTER_OPTIONS)
+form_changed = set(tuple(selected_forms)) != set(FORM_FILTER_OPTIONS)
+year_filter_on = (first_range is not None) or (latest_range is not None)
+has_any_filter_intent = bool(has_id or age_changed or form_changed or year_filter_on)
+has_search_intent = bool(has_ai or has_lit or has_any_filter_intent)
+
+st.markdown('<div id="results"></div>', unsafe_allow_html=True)
+total = len(safe_df_pretty)
+
+results_left, results_right = st.columns([0.85, 0.15])
+
+with results_left:
+    st.subheader("Results")
+
+with results_right:
+    accessible_view = st.toggle(
+        "Accessible view",
+        value=False,
+        key="ui_accessible_view"
+    )
+
+if has_search_intent:
+    if ai_debug.get("used_ai"):
+        stage_hits_after_ai = ai_debug.get("stage_hits_after_ai") or 0
+        if stage_hits_after_ai > total:
+            st.write(f"Matches: {total:,}+ (AI-ranked by relevance)")
+        else:
+            st.write(f"Matches: {total:,} (AI-ranked by relevance)")
+    else:
+        st.write(f"Matches: {total:,}")
+
+if (search_query or "").strip() and not (ai_query or "").strip():
+    st.caption(f"Deterministic search: {search_query}")
+
+if total > 0:
+    total_pages = (total - 1) // int(page_size) + 1
+    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="ui_page")
+    start = (page - 1) * int(page_size)
+    end = min(start + int(page_size), total)
+    page_df = safe_df_pretty.iloc[start:end].copy()
+    st.caption(f"Showing {start + 1:,}-{end:,} of {total:,} matches.")
+else:
+    start = 0
+    end = 0
+    page_df = safe_df_pretty.copy()
+
+if accessible_view:
+    st.caption("Accessible list view: each result is an expandable, structured block.")
+    page_df_internal = safe_df.iloc[start:end].copy() if total > 0 else safe_df.copy()
+    for i, row in page_df_internal.reset_index(drop=True).iterrows():
+        irn_val = row.get("irn", "")
+        varlabel_val = row.get("variable_label", "")
+        age_val = row.get("age", "")
+        form_val = row.get("form", "")
+        fy = row.get("first_yr", "")
+        ly = row.get("latest_yr", "")
+        origq_val = row.get("original_question", "")
+        chgyr_val = row.get("year_question_changed", "")
+        chgtype_val = row.get("type_of_question_change", "")
+        version_val = row.get("version", "")
+        cattext_val = row.get("response_categories", "")
+        key_seed = f"row{i}_irn{irn_val}_a{age_val}_f{form_val}"
+        title_bits = []
+        if str(irn_val).strip():
+            title_bits.append(f"Question ID {irn_val}")
+        if str(varlabel_val).strip():
+            title_bits.append(f"Variable label {varlabel_val}")
+        if str(age_val).strip():
+            title_bits.append(f"AGE {age_val}")
+        if str(form_val).strip():
+            title_bits.append(f"FORM {form_val}")
+        header = " - ".join(title_bits) if title_bits else "Result"
+        with st.expander(header, expanded=False):
+            years_line = ""
+            if str(fy).strip() or str(ly).strip():
+                years_line = f"{fy}-{ly}".strip("-")
+            if years_line:
+                st.write(f"Years: {years_line}")
+            if str(origq_val).strip():
+                st.write(f"Original Question: {origq_val}")
+            if str(chgyr_val).strip() and str(chgyr_val).strip() != "--":
+                st.write(f"Year Question Changed: {chgyr_val}")
+            if str(chgtype_val).strip() and str(chgtype_val).strip() != "--":
+                st.write(f"Type of Question Change: {chgtype_val}")
+            if str(version_val).strip():
+                st.write(f"Version: {version_val}")
+            st.text_area("Question text", value=str(row.get("question_text", "")), height=180, key=f"qa_text_{key_seed}")
+            st.text_area("Response Categories", value=str(cattext_val), height=110, key=f"qa_cat_{key_seed}")
+
+            other = row.drop(labels=["question_text", "response_categories"], errors="ignore")
+
+            field_map = {
+                "irn": "Question ID",
+                "variable_label": "Variable label",
+                "age": "Age",
+                "form": "Form",
+                "first_yr": "First year",
+                "latest_yr": "Latest year",
+                "original_question": "Original Question",
+                "year_question_changed": "Year Question Changed",
+                "type_of_question_change": "Type of Question Change",
+                "question_text": "Question text",
+                "response_categories": "Response Categories",
+                "version": "Version",
+                "Gap_years": "Gap years",
+                "Notes": "Notes",
+                **{k: v.replace("\n", " ") for k, v in PANEL_PRETTY_COLS.items()},
+            }
+
+            other_df = pd.DataFrame({
+                "Field": [field_map.get(x, x) for x in other.index],
+                "Value": other.values
+            })
+
+            st.dataframe(other_df, hide_index=True, width="stretch", key=f"qa_meta_{key_seed}")
+else:
+    st.caption("Tip: click any column heading to sort (click again to reverse; third click resets).")
+    render_wrapped_html_table(page_df, height_px=800)
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    val = os.environ.get(name, "").strip().lower()
+    if val == "":
+        return default
+    return val in ("1", "true", "t", "yes", "y", "on")
+
+EMBEDDINGS_ENABLED = _env_bool("MTF_USE_EMBEDDINGS", True)
+
+if EMBEDDINGS_ENABLED:
+    st.caption("Semantic index: ready")
+else:
+    st.caption("Semantic index: disabled (MTF_USE_EMBEDDINGS=0)")
