@@ -119,29 +119,43 @@ h1 {
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------
-# AI search box
+# Startup status banner
 # -----------------------------------------------------
-st.markdown(
-    '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
-    unsafe_allow_html=True
-)
+if "startup_done" not in st.session_state:
+    startup_status = st.empty()
 
-ai_query = st.text_input(
-    "AI-assisted search",
-    placeholder="Example: Show me questions on perceived risk of LSD use",
-    help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
-          '"questions about mother\'s education", '
-          '"when students first started using marijuana"'),
-    key="ui_ai_query",
-    label_visibility="collapsed",
-)
+    startup_status.info(
+        "Initializing MTF Panel Codebook Search...\n\n"
+        "- Loading codebook\n"
+        "- Building search structures"
+    )
 
-st.caption(
-    "Tip: Use AI-assisted search to find relevant questions. "
-    "Then use Exact Word Search (upper left) with a distinctive phrase "
-    "from the survey question text-or the other filters-to locate that question "
-    "and related ones across the codebooks."
-)
+    st.session_state.startup_banner = startup_status
+
+if "startup_done" in st.session_state:
+    st.markdown(
+        '<div style="font-weight:600; margin-bottom:0.15rem;">AI-assisted search</div>',
+        unsafe_allow_html=True
+    )
+
+    ai_query = st.text_input(
+        "AI-assisted search",
+        placeholder="Example: Show me questions on perceived risk of LSD use",
+        help=('Examples: "perceived risk of MDMA", "disapproval of LSD", '
+              '"questions about mother\'s education", '
+              '"when students first started using marijuana"'),
+        key="ui_ai_query",
+        label_visibility="collapsed",
+    )
+
+    st.caption(
+        "Tip: Use AI-assisted search to find relevant questions. "
+        "Then use Exact Word Search (upper left) with a distinctive phrase "
+        "from the survey question text—or the other filters—to locate that question "
+        "and related ones across the codebooks."
+    )
+else:
+    ai_query = ""
 
 # =====================================================
 # AGE / FORM LABELS
@@ -903,11 +917,7 @@ except FileNotFoundError:
     st.error(f"File not found: {FILE_PATH}")
     st.stop()
 
-st.write("DEBUG 1: file path found")
-
-st.write("DEBUG 2: about to load data")
 df = load_data(str(FILE_PATH), mtime)
-st.write("DEBUG 3: data loaded")
 
 # --- FIX: remove .0 from integer-like numeric fields ---
 def coerce_integer_like_series(s: pd.Series) -> pd.Series:
@@ -996,9 +1006,7 @@ def build_cached_fields(path_str: str, mtime: float):
 
     return blob, qnorm, cnorm, scale, sig, subj_norm
 
-st.write("DEBUG 4: about to build cached fields")
 blob, qnorm, cnorm, scale_series, sig_series, subj_norm = build_cached_fields(str(FILE_PATH), mtime)
-st.write("DEBUG 5: cached fields built")
 df = df.copy()
 df["__BLOB_NORM"] = blob
 df["__QTEXT_NORM"] = qnorm
@@ -1018,9 +1026,7 @@ for k, v in {
 }.items():
     df[k] = subj_norm[v]
 
-st.write("DEBUG 6: about to build entity lexicon")
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
-st.write("DEBUG 7: entity lexicon built")
 AI_MAX_HITS_TARGET_DEFAULT = 60
 
 if "startup_done" not in st.session_state:
@@ -1030,6 +1036,7 @@ if "startup_done" not in st.session_state:
             st.session_state.startup_banner.empty()
         except Exception:
             pass
+    st.rerun()
 
 with st.sidebar:
     st.header("Filters")
