@@ -42,31 +42,34 @@ def app_base_dir() -> Path:
 BASE_DIR = app_base_dir()
 
 # =====================================================
-# Get secrets / env vars
+# LOAD SECRETS / .ENV
 # =====================================================
-def _secret(name: str, default: str = "") -> str:
-    if name in os.environ and str(os.environ[name]).strip():
-        return str(os.environ[name]).strip()
+import streamlit as st
+
+def load_secrets():
+    """Load secrets from Streamlit Cloud, or fall back to local .env file."""
     try:
-        if name in st.secrets:
-            return str(st.secrets[name]).strip()
+        # Check if running on Streamlit Cloud (secrets will be non-empty)
+        if st.secrets:
+            import os
+            for key, value in st.secrets.items():
+                os.environ[key] = str(value)
+            return  # Done — secrets loaded
     except Exception:
-        pass
-    return default
+        pass  # Not on Streamlit Cloud, fall through to .env
 
+    # Fall back to local .env file
+    env_paths = [
+        BASE_DIR / ".env",
+        Path.cwd() / ".env",
+        (Path(sys.executable).resolve().parent / ".env") if getattr(sys, "frozen", False) else None,
+    ]
+    for p in env_paths:
+        if p and p.exists():
+            load_dotenv(dotenv_path=p, override=True)
+            break
 
-# =====================================================
-# LOAD .ENV
-# =====================================================
-env_paths = [
-    BASE_DIR / ".env",
-    Path.cwd() / ".env",
-    (Path(sys.executable).resolve().parent / ".env") if getattr(sys, "frozen", False) else None,
-]
-for p in env_paths:
-    if p and p.exists():
-        load_dotenv(dotenv_path=p, override=True)
-        break
+load_secrets()
 
 # =====================================================
 # PAGE CONFIG
@@ -515,7 +518,6 @@ def _entity_from_question_text(q: str) -> List[str]:
     return uniq
 
 @st.cache_data(show_spinner=False)
-
 def build_entity_lexicon(path_str: str, mtime: float) -> Dict[str, Dict[str, object]]:
     _df = load_data(path_str, mtime)
     qtexts = _df.get("QTEXTALL", pd.Series([""] * len(_df))).astype(str).tolist()
@@ -1052,6 +1054,7 @@ if "startup_done" not in st.session_state:
             st.session_state.startup_banner.empty()
         except Exception:
             pass
+    st.rerun()
 
 with st.sidebar:
     st.header("Filters")
@@ -1124,32 +1127,21 @@ with st.sidebar:
 # =====================================================
 # EMBEDDINGS + LLM HELPERS
 # =====================================================
-
 def _get_azure_client() -> AzureOpenAI:
-    endpoint = _secret("AZURE_OPENAI_ENDPOINT")
-    api_version = _secret("AZURE_OPENAI_API_VERSION")
-    api_key = (
-        _secret("AZURE_OPENAI_API_KEY")
-        or _secret("API_KEY")
-        or _secret("OPENAI_API_KEY")
-    )
-    shortcode = _secret("SHORTCODE")
-
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
+    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "").strip()
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip() or os.environ.get("API_KEY", "").strip()
+    shortcode = os.environ.get("SHORTCODE", "").strip()
     if not endpoint or not api_version or not api_key:
-        raise RuntimeError(
-            "Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / "
-            "AZURE_OPENAI_API_KEY (or API_KEY / OPENAI_API_KEY)."
-        )
+        raise RuntimeError("Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY (or API_KEY).")
     if not shortcode:
         raise RuntimeError("Missing SHORTCODE (required by UM GPT gateway).")
-
     return AzureOpenAI(
         azure_endpoint=endpoint,
         api_version=api_version,
         api_key=api_key,
         organization=shortcode,
     )
-
 
 @st.cache_data(show_spinner=False)
 def llm_expand_for_lexical_rerank(user_query: str, chat_deployment: str) -> Dict[str, List[str]]:
@@ -1581,7 +1573,7 @@ def _env_on(name: str, default: bool = True) -> bool:
         return default
     return v in ("1", "true", "t", "yes", "y", "on")
 
-PREWARM = False
+PREWARM = _env_on("MTF_PREWARM_EMBEDDINGS", True)
 if PREWARM and "startup_done" not in st.session_state:
     try:
         with st.spinner("Preparing AI search index (first run may take ~30 seconds)..."):
