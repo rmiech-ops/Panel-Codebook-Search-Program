@@ -1943,7 +1943,6 @@ preferred_order = [
     "form",
     "first_yr",
     "latest_yr",
-    "original_question",
     "year_question_changed",
     "type_of_question_change",
     "question_text",
