@@ -75,7 +75,6 @@ def load_secrets():
             break
 
 load_secrets()
-st.write("DEBUG secrets loaded:", list(st.secrets.keys()))
 
 # =====================================================
 # ACCESSIBILITY CSS
@@ -1118,7 +1117,7 @@ with st.sidebar:
 def _get_azure_client() -> AzureOpenAI:
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
     api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "").strip()
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip() or os.environ.get("API_KEY", "").strip()
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip() or os.environ.get("OPENAI_API_KEY", "").strip() or os.environ.get("API_KEY", "").strip()
     shortcode = os.environ.get("SHORTCODE", "").strip()
     if not endpoint or not api_version or not api_key:
         raise RuntimeError("Missing AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_VERSION / AZURE_OPENAI_API_KEY (or API_KEY).")
