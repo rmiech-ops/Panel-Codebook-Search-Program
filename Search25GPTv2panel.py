@@ -1047,15 +1047,6 @@ for k, v in {
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
 AI_MAX_HITS_TARGET_DEFAULT = 60
 
-if "startup_done" not in st.session_state:
-    st.session_state.startup_done = True
-    if "startup_banner" in st.session_state:
-        try:
-            st.session_state.startup_banner.empty()
-        except Exception:
-            pass
-    st.rerun()
-
 with st.sidebar:
     st.header("Filters")
 
@@ -1881,6 +1872,11 @@ filtered, ai_debug = apply_filters_cached(
     latest_range,
     int(AI_MAX_HITS_TARGET_DEFAULT),
 )
+
+# Re-cast all columns to object after cache deserialization.
+# st.cache_data round-trips through Arrow which re-infers numeric dtypes.
+for _col in filtered.columns:
+    filtered[_col] = filtered[_col].astype(object)
 
 DROP_COLS = [
     "FIRST_YR_NUM", "LATEST_YR_NUM", "WEB", "RESPCAT_ID", "VNUM", "VERS_ORIG",
