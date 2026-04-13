@@ -1579,12 +1579,12 @@ if PREWARM and "startup_done" not in st.session_state:
         st.session_state.startup_done = True
         st.rerun()
 
-except Exception as e:
-    st.warning(
-        "Semantic index prewarm failed; searches will still work but may be slower. "
-        f"({type(e).__name__}: {e})"
-    )
-    
+    except Exception as e:
+        st.warning(
+            "Semantic index prewarm failed; searches will still work but may be slower. "
+            f"({type(e).__name__}: {e})"
+        )
+
 @st.cache_data(show_spinner=False)
 def apply_filters_cached(
     path_str: str,
