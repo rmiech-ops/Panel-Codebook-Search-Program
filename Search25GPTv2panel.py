@@ -75,6 +75,7 @@ def load_secrets():
             break
 
 load_secrets()
+st.write("DEBUG secrets loaded:", list(st.secrets.keys()))
 
 # =====================================================
 # ACCESSIBILITY CSS
