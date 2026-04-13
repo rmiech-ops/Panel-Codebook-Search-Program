@@ -42,9 +42,17 @@ def app_base_dir() -> Path:
 BASE_DIR = app_base_dir()
 
 # =====================================================
+# PAGE CONFIG
+# =====================================================
+st.set_page_config(
+    page_title="MTF Panel Codebook Search",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# =====================================================
 # LOAD SECRETS / .ENV
 # =====================================================
-import streamlit as st
 
 def load_secrets():
     """Load secrets from Streamlit Cloud, or fall back to local .env file."""
@@ -67,15 +75,6 @@ def load_secrets():
             break
 
 load_secrets()
-
-# =====================================================
-# PAGE CONFIG
-# =====================================================
-st.set_page_config(
-    page_title="MTF Panel Codebook Search",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 # =====================================================
 # ACCESSIBILITY CSS
