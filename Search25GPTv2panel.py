@@ -49,12 +49,9 @@ import streamlit as st
 def load_secrets():
     """Load secrets from Streamlit Cloud, or fall back to local .env file."""
     try:
-        # Check if running on Streamlit Cloud (secrets will be non-empty)
-        if st.secrets:
-            import os
-            for key, value in st.secrets.items():
-                os.environ[key] = str(value)
-            return  # Done — secrets loaded
+        for key, value in st.secrets.items():
+            os.environ[key] = str(value)
+        return  # Done — secrets loaded
     except Exception:
         pass  # Not on Streamlit Cloud, fall through to .env
 
