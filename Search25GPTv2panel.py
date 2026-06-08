@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
 # =====================================================
-# MTF Codebook Streamlit Browser -- Accessible Version + AI Search Gating
+# MTF Panel Codebook Streamlit Browser -- Accessible Version + AI Search Gating
 # Backend from current planner/embedding version
 # UI/startup behavior merged from prior UI version
 # AI search simplified to broad retrieval + ranking (less brittle)
 # ASCII only, Emacs safe, unique widget keys
+#
+# ACCESSIBILITY CHANGE: In accessible view, age and form filters are
+# rendered as individual st.checkbox widgets (each with a fully
+# descriptive label) instead of st.pills (whose deselect controls
+# carry no meaningful ARIA label).
+# The standard (non-accessible) view is unchanged.
 # =====================================================
 
 import os
@@ -59,7 +65,7 @@ def load_secrets():
     try:
         for key, value in st.secrets.items():
             os.environ[key] = str(value)
-        return  # Done — secrets loaded
+        return  # Done -- secrets loaded
     except Exception:
         pass  # Not on Streamlit Cloud, fall through to .env
 
@@ -165,7 +171,7 @@ if "startup_done" in st.session_state:
     st.caption(
         "Tip: Use AI-assisted search to find relevant questions. "
         "Then use Exact Word Search (upper left) with a distinctive phrase "
-        "from the survey question text—or the other filters—to locate that question "
+        "from the survey question text--or the other filters--to locate that question "
         "and related ones across the codebooks."
     )
 else:
@@ -920,7 +926,7 @@ if FILE_PATH is None:
         "The app searched these locations:\n"
         f"{searched}\n\n"
         "Fix options:\n"
-        "1) Put AlliaqToYAMLv2.yaml in the same folder as the app's bundled files.\n"
+        "1) Put PanelAlliaqToYAMLv3.yaml in the same folder as the app's bundled files.\n"
         "2) Or set the environment variable MTF_YAML_PATH to the YAML full path."
     )
     st.stop()
@@ -952,7 +958,7 @@ int_like_cols = [
 for col in int_like_cols:
     if col in df.columns:
         df[col] = coerce_integer_like_series(df[col])
-        
+
 expected_cols = [
     "ITEMREFNO", "QNAME", "BY_X_FU_X", "FORM", "FIRST_YR", "LATEST_YR", "ORIGQ", "CHG_YR", "CHG_TYPE",
     "QTEXTALL", "CATEGORYTEXT", "VERSION",
@@ -1043,8 +1049,28 @@ for k, v in {
 ENTITY_LEXICON = build_entity_lexicon(str(FILE_PATH), mtime)
 AI_MAX_HITS_TARGET_DEFAULT = 60
 
+# =====================================================
+# SIDEBAR
+# The accessible view toggle lives at the TOP of the
+# sidebar so that its value is known before we render
+# the age/form filter widgets.  When accessible_view
+# is True the age and form filters are rendered as
+# individual st.checkbox widgets (each with a fully
+# descriptive label) instead of st.pills (whose
+# deselect controls carry no meaningful ARIA label).
+# =====================================================
+
 with st.sidebar:
     st.header("Filters")
+
+    # --------------------------------------------------
+    # Accessible-view toggle  (top of sidebar)
+    # --------------------------------------------------
+    accessible_view = st.toggle(
+        "Accessible view",
+        value=False,
+        key="ui_accessible_view_sidebar",
+    )
 
     search_query = st.text_input(
         "Exact word search (no AI assistance)",
@@ -1073,20 +1099,59 @@ with st.sidebar:
                 key="ui_phrase_mode",
             )
 
-    selected_ages = st.pills(
-       "Age",
-        options=AGE_FILTER_OPTIONS,
-        default=AGE_FILTER_OPTIONS,
-        selection_mode="multi",
-        key="ui_age_labels",
-    )
-    selected_forms = st.pills(
-        "Form",
-        options=FORM_FILTER_OPTIONS,
-        default=FORM_FILTER_OPTIONS,
-        selection_mode="multi",
-        key="ui_forms",
-    )
+    # --------------------------------------------------
+    # Age filter
+    # Standard view: st.pills (compact, visual chips)
+    # Accessible view: one labelled checkbox per age
+    # --------------------------------------------------
+    if accessible_view:
+        st.markdown("**Age**")
+        st.caption("Select one or more age groups to include in results.")
+        age_checks: Dict[str, bool] = {}
+        for age_opt in AGE_FILTER_OPTIONS:
+            age_checks[age_opt] = st.checkbox(
+                f"Age {age_opt}",
+                value=True,
+                key=f"ui_age_check_{age_opt.replace('-', '_')}",
+            )
+        selected_ages = [a for a, checked in age_checks.items() if checked]
+    else:
+        selected_ages = st.pills(
+            "Age",
+            options=AGE_FILTER_OPTIONS,
+            default=AGE_FILTER_OPTIONS,
+            selection_mode="multi",
+            key="ui_age_labels",
+        )
+
+    # --------------------------------------------------
+    # Form filter
+    # Standard view: st.pills
+    # Accessible view: one labelled checkbox per form
+    # --------------------------------------------------
+    if accessible_view:
+        st.markdown("**Form (include)**")
+        st.caption("Select one or more forms to include in results.")
+        form_checks: Dict[str, bool] = {}
+        for form_opt in FORM_FILTER_OPTIONS:
+            # Build a safe widget key: replace spaces, commas, slashes, +
+            safe_key = re.sub(r"[^a-z0-9]", "_", form_opt.lower())
+            # Use a human-readable label: pills already say "n/a, age 35+"
+            form_checks[form_opt] = st.checkbox(
+                form_opt if form_opt == "n/a, age 35+" else f"Form {form_opt}",
+                value=True,
+                key=f"ui_form_check_{safe_key}",
+            )
+        selected_forms = [f for f, checked in form_checks.items() if checked]
+    else:
+        selected_forms = st.pills(
+            "Form",
+            options=FORM_FILTER_OPTIONS,
+            default=FORM_FILTER_OPTIONS,
+            selection_mode="multi",
+            key="ui_forms",
+        )
+
     irn = st.text_input("Question ID", key="ui_irn")
     first_vals = df["FIRST_YR_NUM"].dropna()
     latest_vals = df["LATEST_YR_NUM"].dropna()
@@ -1581,6 +1646,10 @@ if PREWARM and "startup_done" not in st.session_state:
             f"({type(e).__name__}: {e})"
         )
 
+if "startup_done" not in st.session_state:
+    st.session_state.startup_done = True
+    st.rerun()
+
 @st.cache_data(show_spinner=False)
 def apply_filters_cached(
     path_str: str,
@@ -1870,7 +1939,6 @@ filtered, ai_debug = apply_filters_cached(
 )
 
 # Re-cast all columns to object after cache deserialization.
-# st.cache_data round-trips through Arrow which re-infers numeric dtypes.
 for _col in filtered.columns:
     filtered[_col] = filtered[_col].astype(object)
 
@@ -1978,17 +2046,10 @@ has_search_intent = bool(has_ai or has_lit or has_any_filter_intent)
 st.markdown('<div id="results"></div>', unsafe_allow_html=True)
 total = len(safe_df_pretty)
 
-results_left, results_right = st.columns([0.85, 0.15])
+st.subheader("Results")
 
-with results_left:
-    st.subheader("Results")
-
-with results_right:
-    accessible_view = st.toggle(
-        "Accessible view",
-        value=False,
-        key="ui_accessible_view"
-    )
+# Note: the accessible_view toggle is now in the sidebar (top), so we
+# do NOT render a second toggle here in the results header area.
 
 if has_search_intent:
     if ai_debug.get("used_ai"):
@@ -2014,6 +2075,15 @@ else:
     start = 0
     end = 0
     page_df = safe_df_pretty.copy()
+
+# =====================================================
+# RESULTS RENDERING
+# accessible_view is read from sidebar state.
+# When True: expandable list with fully labelled
+#   st.checkbox filters in the sidebar (no st.pills
+#   deselect controls with unlabelled interactions).
+# When False: the original sortable HTML table.
+# =====================================================
 
 if accessible_view:
     st.caption("Accessible list view: each result is an expandable, structured block.")
