@@ -1968,7 +1968,6 @@ safe_df = safe_df.rename(columns={
     "CHG_TYPE": "type_of_question_change",
     "QTEXTALL": "question_text",
     "CATEGORYTEXT": "response_categories",
-    "CATEGORY TEXT": "response_categories",
     "VERSION": "version",
     "BY_PANL": "by_panel",
     "FU1_PANL": "fu1_panel",
