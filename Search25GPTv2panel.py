@@ -733,6 +733,44 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
         col = df.columns[i]
         df[col] = s.astype("object")
 
+    # --------------------------------------------------
+    # Replace "--" with a "note" placeholder (tooltip on
+    # hover) in panel columns that are structurally never
+    # populated for a given row's Age value:
+    #   - Age 35..65 (FZ) columns are blank when Age is 18
+    #     or 19-30.
+    #   - Age 19-20..29-30 (FU) columns are blank when Age
+    #     is 35 or older.
+    # --------------------------------------------------
+    NOTE_FZ_SENTINEL = "@@MTF_NOTE_FZ@@"
+    NOTE_FU_SENTINEL = "@@MTF_NOTE_FU@@"
+    NOTE_FZ_MSG = "These variables, if present, only appear when the value of Age column is 35+"
+    NOTE_FU_MSG = "These variables, if present, only appear when the value of Age column is Age 18 or Age 19-30."
+
+    FZ_PANEL_COLS_PRETTY = [
+        "Age 35\n(FZ1)", "Age 40\n(FZ2)", "Age 45\n(FZ3)", "Age 50\n(FZ4)",
+        "Age 55\n(FZ5)", "Age 60\n(FZ6)", "Age 65\n(FZ7)",
+    ]
+    FU_PANEL_COLS_PRETTY = [
+        "Age 19-20\n(FU1)", "Age 21-22\n(FU2)", "Age 23-24\n(FU3)",
+        "Age 25-26\n(FU4)", "Age 27-28\n(FU5)", "Age 29-30\n(FU6)",
+    ]
+
+    if "Age" in df.columns:
+        age_vals = df["Age"].astype(str).str.strip()
+        is_young = age_vals.isin(["18", "19-30"])
+        is_older = age_vals.isin(["35", "40", "45", "50", "55", "60", "65"])
+
+        for c in FZ_PANEL_COLS_PRETTY:
+            if c in df.columns:
+                mask = is_young & (df[c].astype(str).str.strip() == "--")
+                df.loc[mask, c] = NOTE_FZ_SENTINEL
+
+        for c in FU_PANEL_COLS_PRETTY:
+            if c in df.columns:
+                mask = is_older & (df[c].astype(str).str.strip() == "--")
+                df.loc[mask, c] = NOTE_FU_SENTINEL
+
     cols = list(df.columns)
     col_width_px = {
         "Question\nID": 73,
@@ -780,6 +818,16 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
         return '<th><div class="th-wrap"><span class="th-label" role="button" tabindex="0">' + inner + '</span><span class="sort-ind" aria-hidden="true"></span><span class="resizer" aria-hidden="true"></span></div></th>'
 
     html_table = re.sub(r"<th>(.*?)</th>", _th_repl, html_table, count=0)
+
+    html_table = html_table.replace(
+        NOTE_FZ_SENTINEL,
+        f'<span class="mtf-note-cell" tabindex="0" title="{NOTE_FZ_MSG}">note</span>'
+    )
+    html_table = html_table.replace(
+        NOTE_FU_SENTINEL,
+        f'<span class="mtf-note-cell" tabindex="0" title="{NOTE_FU_MSG}">note</span>'
+    )
+
     css_lines = []
     center_all = {
         "Question\nID",
@@ -836,6 +884,7 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
 .mtf-wrap .sort-ind {{ flex: 0 0 auto; width: 12px; text-align: center; opacity: 0.7; font-size: 11px; }}
 .mtf-wrap .resizer {{ position: absolute; right: -8px; top: 0; width: 16px; height: 100%; cursor: col-resize; z-index: 3; }}
 .mtf-wrap .resizer:hover {{ background: rgba(0,0,0,0.08); }}
+.mtf-wrap .mtf-note-cell {{ cursor: help; border-bottom: 1px dotted #777; color: #555; font-style: italic; }}
 {alignment_css}
 </style>
 <div class="mtf-wrap" id="mtf_wrap">{html_table}</div>
@@ -2127,7 +2176,26 @@ if accessible_view:
             st.text_area("Question text", value=str(row.get("question_text", "")), height=180, key=f"qa_text_{key_seed}")
             st.text_area("Response Categories", value=str(cattext_val), height=110, key=f"qa_cat_{key_seed}")
 
-            other = row.drop(labels=["question_text", "response_categories"], errors="ignore")
+            other = row.drop(labels=["question_text", "response_categories"], errors="ignore").copy()
+
+            row_age_val = str(row.get("age", "")).strip()
+            is_young_row = row_age_val in ("18", "19-30")
+            is_older_row = row_age_val in ("35", "40", "45", "50", "55", "60", "65")
+
+            FZ_PANEL_FIELDS = ["fz1_panel", "fz2_panel", "fz3_panel", "fz4_panel", "fz5_panel", "fz6_panel", "fz7_panel"]
+            FU_PANEL_FIELDS = ["fu1_panel", "fu2_panel", "fu3_panel", "fu4_panel", "fu5_panel", "fu6_panel"]
+            NOTE_FZ_MSG = "note: These variables, if present, only appear when the value of Age column is 35+"
+            NOTE_FU_MSG = "note: These variables, if present, only appear when the value of Age column is Age 18 or Age 19-30."
+
+            if is_young_row:
+                for f in FZ_PANEL_FIELDS:
+                    if f in other.index and str(other[f]).strip() == "--":
+                        other[f] = NOTE_FZ_MSG
+
+            if is_older_row:
+                for f in FU_PANEL_FIELDS:
+                    if f in other.index and str(other[f]).strip() == "--":
+                        other[f] = NOTE_FU_MSG
 
             field_map = {
                 "irn": "Question ID",
