@@ -1983,9 +1983,9 @@ def apply_filters_cached(
         s = pd.to_numeric(filtered["LATEST_YR"], errors="coerce")
         filtered = filtered[s.notna() & (s >= y0) & (s <= y1)]
         
-        # Suppress questions that extend beyond 2021
-        s = pd.to_numeric(filtered["LATEST_YR"], errors="coerce")
-        filtered = filtered[s.isna() | (s <= 2021)]
+    # Suppress questions that extend beyond 2021
+    s = pd.to_numeric(filtered["LATEST_YR"], errors="coerce")
+    filtered = filtered[s.isna() | (s <= 2021)]
         
     return filtered, debug
 
