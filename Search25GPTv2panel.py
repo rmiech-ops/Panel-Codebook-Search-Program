@@ -266,6 +266,18 @@ def origq_to_yes_no(x) -> str:
         return ""
     return str(x)
 
+
+def format_panel_variable_number(x) -> str:
+    """Display panel variable numbers with a leading capital V."""
+    s = str(x).strip()
+    if s.lower() in ("", "nan", "none"):
+        return ""
+    if s == "--" or s.lower().startswith("note:"):
+        return s
+    if re.match(r"^[vV]", s):
+        return "V" + s[1:]
+    return "V" + s
+
 ENV_YAML = os.environ.get("MTF_YAML_PATH", "").strip()
 CANDIDATES = []
 if ENV_YAML:
@@ -752,6 +764,7 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
         "Age 55\n(FZ5)", "Age 60\n(FZ6)", "Age 65\n(FZ7)",
     ]
     FU_PANEL_COLS_PRETTY = [
+        "Age 18\n(BY)",
         "Age 19-20\n(FU1)", "Age 21-22\n(FU2)", "Age 23-24\n(FU3)",
         "Age 25-26\n(FU4)", "Age 27-28\n(FU5)", "Age 29-30\n(FU6)",
     ]
@@ -773,7 +786,7 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
 
     cols = list(df.columns)
     col_width_px = {
-        "Question\nID": 73,
+        "Question\nID\n(item number)": 95,
         "Variable\nlabel": 135,
         "Age": 85,
         "Form": 55,
@@ -784,7 +797,6 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
         "Type of\nQuestion Change": 85,
         "Question\ntext": 350,
         "Response\nCategories": 230,
-        "Version": 65,
         "Age 18\n(BY)": 130,
         "Age 19-20\n(FU1)": 130,
         "Age 21-22\n(FU2)": 130,
@@ -821,22 +833,21 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
 
     html_table = html_table.replace(
         NOTE_FZ_SENTINEL,
-        f'<span class="mtf-note-cell" tabindex="0" title="{NOTE_FZ_MSG}">note</span>'
+        f'<span class="mtf-note-cell" tabindex="0" data-tooltip="{NOTE_FZ_MSG}">note</span>'
     )
     html_table = html_table.replace(
         NOTE_FU_SENTINEL,
-        f'<span class="mtf-note-cell" tabindex="0" title="{NOTE_FU_MSG}">note</span>'
+        f'<span class="mtf-note-cell" tabindex="0" data-tooltip="{NOTE_FU_MSG}">note</span>'
     )
 
     css_lines = []
     center_all = {
-        "Question\nID",
+        "Question\nID\n(item number)",
         "Age",
         "Form",
         "First\nyear",
         "Latest\nyear",
         "Original\nQuestion",
-        "Version",
         "Year Question\nChanged",
         "Type of\nQuestion Change",
         "BY_Panl",
@@ -884,7 +895,9 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
 .mtf-wrap .sort-ind {{ flex: 0 0 auto; width: 12px; text-align: center; opacity: 0.7; font-size: 11px; }}
 .mtf-wrap .resizer {{ position: absolute; right: -8px; top: 0; width: 16px; height: 100%; cursor: col-resize; z-index: 3; }}
 .mtf-wrap .resizer:hover {{ background: rgba(0,0,0,0.08); }}
-.mtf-wrap .mtf-note-cell {{ cursor: help; border-bottom: 1px dotted #777; color: #555; font-style: italic; }}
+.mtf-wrap .mtf-note-cell {{ cursor: default; border-bottom: 1px dotted #777; color: #555; font-style: italic; position: relative; display: inline-block; }}
+.mtf-wrap .mtf-note-cell::after {{ content: attr(data-tooltip); display: none; position: absolute; left: 0; top: 1.35em; z-index: 9999; min-width: 260px; max-width: 360px; padding: 6px 8px; border: 1px solid #555; border-radius: 4px; background: #fff; color: #111; font-style: normal; text-align: left; line-height: 1.25; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }}
+.mtf-wrap .mtf-note-cell:hover::after, .mtf-wrap .mtf-note-cell:focus::after {{ display: block; }}
 {alignment_css}
 </style>
 <div class="mtf-wrap" id="mtf_wrap">{html_table}</div>
@@ -2044,6 +2057,10 @@ if "branch" in safe_df.columns:
 if "original_question" in safe_df.columns:
     safe_df["original_question"] = safe_df["original_question"].apply(origq_to_yes_no)
 
+for _panel_col in PANEL_FIELD_ORDER:
+    if _panel_col in safe_df.columns:
+        safe_df[_panel_col] = safe_df[_panel_col].apply(format_panel_variable_number)
+
 preferred_order = [
     "irn",
     "variable_label",
@@ -2055,7 +2072,6 @@ preferred_order = [
     "type_of_question_change",
     "question_text",
     "response_categories",
-    "version",
     *PANEL_FIELD_ORDER,
     "Gap_years",
     "Notes",
@@ -2065,7 +2081,7 @@ cols = [c for c in preferred_order if c in safe_df.columns]
 safe_df = safe_df[cols]
 
 PRETTY_COLS = {
-    "irn": "Question\nID",
+    "irn": "Question\nID\n(item number)",
     "variable_label": "Variable\nlabel",
     "age": "Age",
     "form": "Form",
@@ -2076,7 +2092,6 @@ PRETTY_COLS = {
     "type_of_question_change": "Type of\nQuestion Change",
     "question_text": "Question\ntext",
     "response_categories": "Response\nCategories",
-    "version": "Version",
     **PANEL_PRETTY_COLS,
 }
 
@@ -2146,7 +2161,6 @@ if accessible_view:
         origq_val = row.get("original_question", "")
         chgyr_val = row.get("year_question_changed", "")
         chgtype_val = row.get("type_of_question_change", "")
-        version_val = row.get("version", "")
         cattext_val = row.get("response_categories", "")
         key_seed = f"row{i}_irn{irn_val}_a{age_val}_f{form_val}"
         title_bits = []
@@ -2171,8 +2185,6 @@ if accessible_view:
                 st.write(f"Year Question Changed: {chgyr_val}")
             if str(chgtype_val).strip() and str(chgtype_val).strip() != "--":
                 st.write(f"Type of Question Change: {chgtype_val}")
-            if str(version_val).strip():
-                st.write(f"Version: {version_val}")
             st.text_area("Question text", value=str(row.get("question_text", "")), height=180, key=f"qa_text_{key_seed}")
             st.text_area("Response Categories", value=str(cattext_val), height=110, key=f"qa_cat_{key_seed}")
 
@@ -2183,7 +2195,7 @@ if accessible_view:
             is_older_row = row_age_val in ("35", "40", "45", "50", "55", "60", "65")
 
             FZ_PANEL_FIELDS = ["fz1_panel", "fz2_panel", "fz3_panel", "fz4_panel", "fz5_panel", "fz6_panel", "fz7_panel"]
-            FU_PANEL_FIELDS = ["fu1_panel", "fu2_panel", "fu3_panel", "fu4_panel", "fu5_panel", "fu6_panel"]
+            FU_PANEL_FIELDS = ["by_panel", "fu1_panel", "fu2_panel", "fu3_panel", "fu4_panel", "fu5_panel", "fu6_panel"]
             NOTE_FZ_MSG = "note: These variables, if present, only appear when the value of Age column is 35+"
             NOTE_FU_MSG = "note: These variables, if present, only appear when the value of Age column is Age 18 or Age 19-30."
 
@@ -2209,7 +2221,6 @@ if accessible_view:
                 "type_of_question_change": "Type of Question Change",
                 "question_text": "Question text",
                 "response_categories": "Response Categories",
-                "version": "Version",
                 "Gap_years": "Gap years",
                 "Notes": "Notes",
                 **{k: v.replace("\n", " ") for k, v in PANEL_PRETTY_COLS.items()},
