@@ -848,8 +848,8 @@ def render_wrapped_html_table(df_in: pd.DataFrame, height_px: int = 800) -> None
         "First\nyear",
         "Latest\nyear",
         "Original\nQuestion",
-        "Year Question\nChanged",
-        "Type of\nQuestion Change",
+        "Year of Change",
+        "Type of Change",
         "BY_Panl",
         "FU1_Panl",
         "FU2_Panl",
@@ -2092,8 +2092,8 @@ PRETTY_COLS = {
     "first_yr": "First\nyear",
     "latest_yr": "Latest\nyear",
     "original_question": "Original\nQuestion",
-    "year_question_changed": "Year Question\nChanged",
-    "type_of_question_change": "Type of\nQuestion Change",
+    "year_question_changed": "Year of Change",
+    "type_of_question_change": "Type of Change",
     "question_text": "Question\ntext",
     "response_categories": "Response\nCategories",
     **PANEL_PRETTY_COLS,
@@ -2186,9 +2186,9 @@ if accessible_view:
             if str(origq_val).strip():
                 st.write(f"Original Question: {origq_val}")
             if str(chgyr_val).strip() and str(chgyr_val).strip() != "--":
-                st.write(f"Year Question Changed: {chgyr_val}")
+                st.write(f"Year of Change: {chgyr_val}")
             if str(chgtype_val).strip() and str(chgtype_val).strip() != "--":
-                st.write(f"Type of Question Change: {chgtype_val}")
+                st.write(f"Type of Change: {chgtype_val}")
             st.text_area("Question text", value=str(row.get("question_text", "")), height=180, key=f"qa_text_{key_seed}")
             st.text_area("Response Categories", value=str(cattext_val), height=110, key=f"qa_cat_{key_seed}")
 
